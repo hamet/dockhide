@@ -1,34 +1,34 @@
 import Cocoa
 import ApplicationServices
 
-// dockhide — прячет приложение (Cmd+H) при клике по его иконке в Доке,
-// если оно уже является активным (frontmost). Повторный клик — показывает
-// обратно штатным поведением Дока.
+// dockhide — hides an app (Cmd+H) when its Dock icon is clicked
+// while it is already the active (frontmost) app. A second click shows it
+// again via the Dock's standard behavior.
 //
-// Сборка:  swiftc -O dockhide.swift -o dockhide
-// Запуск:  ./dockhide   (потребуется разрешение "Универсальный доступ")
+// Build:  swiftc -O dockhide.swift -o dockhide
+// Run:    ./dockhide   (requires the Accessibility permission)
 
-// --- Проверка разрешения Accessibility ---
+// --- Accessibility permission check ---
 let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
 if !AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) {
-    print("Нет разрешения Accessibility.")
-    print("Системные настройки → Конфиденциальность и безопасность → Универсальный доступ → добавьте dockhide (или терминал, из которого он запущен), затем перезапустите.")
+    print("Accessibility permission is missing.")
+    print("System Settings → Privacy & Security → Accessibility → add dockhide (or the terminal it is launched from), then restart it.")
     exit(1)
 }
 
-// --- Исключения ---
-// Приложения, для которых клик по иконке — это действие, а не «показать окна»:
-// их dockhide не трогает, клик уходит Доку как обычно.
+// --- Exclusions ---
+// Apps whose Dock icon click is an action rather than "show my windows":
+// dockhide leaves them alone and passes the click to the Dock as usual.
 let excludedBundleIDs: Set<String> = [
     "com.hamet.showdesktop",
 ]
 
-// --- Глобальное состояние ---
+// --- Global state ---
 let systemWide = AXUIElementCreateSystemWide()
 var eventTap: CFMachPort? = nil
 var swallowNextMouseUp = false
 
-// Возвращает приложение, если под точкой point находится его иконка в Доке
+// Returns the app whose Dock icon is under `point`, if any
 func appUnderDockIcon(at point: CGPoint) -> NSRunningApplication? {
     var elRef: AXUIElement?
     guard AXUIElementCopyElementAtPosition(systemWide,
@@ -36,23 +36,23 @@ func appUnderDockIcon(at point: CGPoint) -> NSRunningApplication? {
                                            &elRef) == .success,
           let el = elRef else { return nil }
 
-    // Элемент должен принадлежать процессу Dock
+    // The element must belong to the Dock process
     var pid: pid_t = 0
     guard AXUIElementGetPid(el, &pid) == .success,
           let owner = NSRunningApplication(processIdentifier: pid),
           owner.bundleIdentifier == "com.apple.dock" else { return nil }
 
-    // И быть именно иконкой приложения (не папкой, не корзиной, не разделителем)
+    // ...and must be an application icon (not a folder, the Trash, or a separator)
     var subroleRef: CFTypeRef?
     AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &subroleRef)
     guard (subroleRef as? String) == "AXApplicationDockItem" else { return nil }
 
-    // Приложение должно быть запущено
+    // The app must be running
     var runningRef: CFTypeRef?
     AXUIElementCopyAttributeValue(el, "AXIsApplicationRunning" as CFString, &runningRef)
     guard (runningRef as? NSNumber)?.boolValue == true else { return nil }
 
-    // URL бандла иконки → сопоставляем с запущенными приложениями
+    // Icon's bundle URL → match against running applications
     var urlRef: CFTypeRef?
     AXUIElementCopyAttributeValue(el, kAXURLAttribute as CFString, &urlRef)
     guard let nsurl = urlRef as? NSURL else { return nil }
@@ -63,14 +63,14 @@ func appUnderDockIcon(at point: CGPoint) -> NSRunningApplication? {
     }
 }
 
-// --- Callback для event tap ---
+// --- Event tap callback ---
 func tapCallback(proxy: CGEventTapProxy,
                  type: CGEventType,
                  event: CGEvent,
                  refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     switch type {
     case .tapDisabledByTimeout, .tapDisabledByUserInput:
-        // Система могла отключить tap — включаем обратно
+        // The system may have disabled the tap — re-enable it
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
 
     case .leftMouseUp:
@@ -80,8 +80,8 @@ func tapCallback(proxy: CGEventTapProxy,
         }
 
     case .leftMouseDown:
-        // Клики с модификаторами не трогаем (Ctrl — контекстное меню,
-        // Option/Cmd — штатные жесты Дока)
+        // Leave modified clicks alone (Ctrl — context menu,
+        // Option/Cmd — standard Dock gestures)
         guard event.flags.intersection([.maskCommand, .maskAlternate,
                                         .maskControl, .maskShift]).isEmpty
         else { break }
@@ -91,7 +91,7 @@ func tapCallback(proxy: CGEventTapProxy,
            !excludedBundleIDs.contains(app.bundleIdentifier ?? "") {
             app.hide()
             swallowNextMouseUp = true
-            return nil  // не отдаём клик Доку, иначе он тут же активирует приложение
+            return nil  // don't pass the click to the Dock, or it would re-activate the app right away
         }
 
     default:
@@ -100,7 +100,7 @@ func tapCallback(proxy: CGEventTapProxy,
     return Unmanaged.passUnretained(event)
 }
 
-// --- Создание event tap ---
+// --- Event tap setup ---
 let mask: CGEventMask =
     (1 << CGEventType.leftMouseDown.rawValue) |
     (1 << CGEventType.leftMouseUp.rawValue)
@@ -113,7 +113,7 @@ eventTap = CGEvent.tapCreate(tap: .cgSessionEventTap,
                              userInfo: nil)
 
 guard let tap = eventTap else {
-    print("Не удалось создать event tap — проверьте разрешение Accessibility.")
+    print("Failed to create the event tap — check the Accessibility permission.")
     exit(1)
 }
 
@@ -121,5 +121,5 @@ let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
 
-print("dockhide запущен: клик по иконке активного приложения в Доке прячет его.")
+print("dockhide is running: clicking the Dock icon of the active app hides it.")
 CFRunLoopRun()
