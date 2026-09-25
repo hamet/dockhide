@@ -16,6 +16,13 @@ if !AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) {
     exit(1)
 }
 
+// --- Исключения ---
+// Приложения, для которых клик по иконке — это действие, а не «показать окна»:
+// их dockhide не трогает, клик уходит Доку как обычно.
+let excludedBundleIDs: Set<String> = [
+    "com.hamet.showdesktop",
+]
+
 // --- Глобальное состояние ---
 let systemWide = AXUIElementCreateSystemWide()
 var eventTap: CFMachPort? = nil
@@ -80,7 +87,8 @@ func tapCallback(proxy: CGEventTapProxy,
         else { break }
 
         if let app = appUnderDockIcon(at: event.location),
-           app.isActive, !app.isHidden {
+           app.isActive, !app.isHidden,
+           !excludedBundleIDs.contains(app.bundleIdentifier ?? "") {
             app.hide()
             swallowNextMouseUp = true
             return nil  // не отдаём клик Доку, иначе он тут же активирует приложение
